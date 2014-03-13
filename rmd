@@ -1,0 +1,89 @@
+**This is your second homework due Tuesday Feb 18.**
+
+Reproduce the results presented in Figure 2 of the following paper: 
+Qian, F., Bolen, C. R., Jing, C., Wang, X., Zheng, W., Zhao, H., et al. (2013). Impaired toll-like receptor 3-mediated immune responses from macrophages of patients chronically infected with hepatitis C virus. Clinical and Vaccine Immunology : CVI, 20(2), 146–155. doi:10.1128/CVI.00530-12
+
+You will have to:
+
+1. Get the data from GEO
+2. Normalize the data (if necessary)
+3. Use limma to test for differential expression
+4. Display the results using a heatmap [Hint: Use the pheatmap package]
+
+## Get the data from GEO
+
+## Setting up the database connection
+library(GEOmetadb)
+geo_con <- dbConnect(SQLite(),'GEOmetadb.sqlite')
+
+## Downloading the ExpressionSet
+GSE40812_set <- getGEO("GSE40812")  ##File stored at: /tmp/RtmpH31rOn/GPL10558.soft
+
+## Get the macrophage data and assign variable names
+
+library(Biobase)
+GSE40812_set <- GSE40812_set[[1]]
+pd <- pData(GSE40812_set)
+mmpd <- pd[pd$source_name_ch1 == "Monocyte-derived Macrophage",]
+mmeset <- GSE40812_set[,rownames(mmpd)]
+
+#characteristic_ch1 indicates VL++ or VL--
+#characteristic_ch1.2 indicates Mock or Poly IC
+
+mmpd$HCV <- gsub(".*:","",mmpd$characteristics_ch1)
+mmpd$HCV <- ifelse(mmpd$HCV=="Neg","-","+")
+mmpd$treatment <- tolower(gsub(".*:","",mmpd$characteristics_ch1.2))
+
+## Add subject ID information
+title<-as.character(pData(GSE40812_set)$title)
+ID<-(unlist(strsplit(title,"_",fixed=T)))[seq(2,400,5)]
+
+
+
+## From the paper: "Raw expression data were normalized using the quantile method provided by the beadarray package in R/Bioconductor"
+
+## The data taken from GEO should already be normalized by the authors (normalizing again anyway)
+# Load the lumi package for quantile normalization of Illumina data
+
+library(lumi)
+
+# Perform quantile normalization
+
+GSE40812_norm <- lumiN(GSE40812_set)
+
+## Use limma to test for differential expression; we are interested in Mock vs. Poly IC stimulated macrophages for VL- and VL+ patients
+
+# Design matrix for Mock vs. Poly IC (this design matrix indicates if patients were categorized as "Poly IC H" or "Poly IC L")
+mm_treatment <- model.matrix(~characteristics_ch1.2, GSE40812_norm)
+
+# Fit linear model
+fit_treatment <- lmFit (GSE40812_norm, mm_treatment)
+
+# Compute moderated t-statistics, moderated F-statistic, and log-odds of differential expression
+ebay_treatment <- eBayes(fit_treatment)
+
+## Use TopTable to view the results
+
+# To view the top 10 genes (just out of curiousity)
+toptable(fit_treatment) #I can see that the top gene is ILMN_1770653; name = MAL2
+
+# Results for only those with a p-value <0.05 and foldchange >1.5
+top_treatment <- topTable(ebay_treatment, coef="characteristics_ch1.2treatment: Poly IC H", number=Inf, sort.by="none")
+dim(top_treatment[which(top_treatment$adj.P.Val<0.05 & abs(top_treatment$logFC)>log2(1.5)),])
+
+## Repeat above analysis with the HCV variable: Design matrix for HCV+ vs HCV- (HCV+ is characterized by the variable "characteristics_ch1infection status: Pos")
+mm_HCV <- model.matrix(~characteristics_ch1, GSE40812_norm)
+fit_HCV <- lmFit (GSE40812_norm, mm_HCV)
+ebay_HCV <- eBayes(fit_HCV)
+
+# Top 10 genes (out of curiosity)
+toptable(fit_HCV) #MAL2 is at the top of the list once again; TOMM20L, WFDC1, DLC1, TSNARE1 & RPGRIP1L also appear on both lists
+
+# Results for only those with a p-value of <0.05 and foldchange >1.5
+top_HCV <- topTable(ebay_HCV, coef="characteristics_ch1infection status: Pos", number=Inf, sort.by="none")
+dim(top_HCV[which(top_HCV$adj.P.Val<0.05 & abs(top_HCV$logFC)>log2(1.5)),])
+
+# 'Macrophage Signature Cutoff' is actually defined as p<0.1 in the methods section of the paper, so applying this criteria
+dim(top_HCV[which(top_HCV$adj.P.Val<0.10),])
+
+
